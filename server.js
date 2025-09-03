@@ -2,8 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
 const { v4: uuidv4 } = require('uuid');
-const path = require('path');
-require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -14,7 +12,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Initialize SQLite database
-const db = new sqlite3.Database(process.env.DATABASE_PATH || './tracking.db');
+const db = new sqlite3.Database('./tracking.db');
 
 // Create tables if they don't exist
 db.serialize(() => {
@@ -35,7 +33,7 @@ db.serialize(() => {
     )
   `);
 
-  // Click events table (for multiple click tracking)
+  // Click events table
   db.run(`
     CREATE TABLE IF NOT EXISTS click_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,9 +60,7 @@ db.serialize(() => {
   console.log('✅ Database initialized');
 });
 
-// ============ API ENDPOINTS ============
-
-// 1. Register a new link (called from n8n)
+// Register a new link (called from n8n)
 app.post('/api/register-link', (req, res) => {
   const { contactId, contactEmail, agentType, originalUrl } = req.body;
   
@@ -72,7 +68,7 @@ app.post('/api/register-link', (req, res) => {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
-  const trackingId = uuidv4().substring(0, 8); // Shorter ID for cleaner URLs
+  const trackingId = uuidv4().substring(0, 8);
   
   db.run(
     `INSERT INTO links (tracking_id, contact_id, contact_email, agent_type, original_url)
@@ -94,13 +90,12 @@ app.post('/api/register-link', (req, res) => {
   );
 });
 
-// 2. Handle link clicks (redirect)
+// Handle link clicks (redirect)
 app.get('/t/:trackingId', (req, res) => {
   const { trackingId } = req.params;
   const ipAddress = req.ip;
   const userAgent = req.get('user-agent');
   
-  // First, get the original URL
   db.get(
     'SELECT original_url, clicked FROM links WHERE tracking_id = ?',
     [trackingId],
@@ -110,13 +105,11 @@ app.get('/t/:trackingId', (req, res) => {
         return res.status(404).send('Link not found');
       }
       
-      // Log the click event
       db.run(
         'INSERT INTO click_events (tracking_id, ip_address, user_agent) VALUES (?, ?, ?)',
         [trackingId, ipAddress, userAgent]
       );
       
-      // Update link as clicked if first click
       if (!row.clicked) {
         db.run(
           'UPDATE links SET clicked = 1, clicked_at = CURRENT_TIMESTAMP WHERE tracking_id = ?',
@@ -124,13 +117,12 @@ app.get('/t/:trackingId', (req, res) => {
         );
       }
       
-      // Redirect to original URL
       res.redirect(row.original_url);
     }
   );
 });
 
-// 3. Webhook for GHL appointment booked
+// Webhook for GHL appointment booked
 app.post('/webhook/appointment', (req, res) => {
   const { contactId, appointmentId } = req.body;
   
@@ -138,7 +130,6 @@ app.post('/webhook/appointment', (req, res) => {
     return res.status(400).json({ error: 'Missing contactId' });
   }
   
-  // Find the most recent clicked link for this contact
   db.get(
     `SELECT tracking_id FROM links 
      WHERE contact_id = ? AND clicked = 1 
@@ -152,7 +143,6 @@ app.post('/webhook/appointment', (req, res) => {
       
       const trackingId = row ? row.tracking_id : null;
       
-      // Record the conversion
       db.run(
         'INSERT INTO conversions (contact_id, tracking_id, metadata) VALUES (?, ?, ?)',
         [contactId, trackingId, JSON.stringify({ appointmentId })],
@@ -162,7 +152,6 @@ app.post('/webhook/appointment', (req, res) => {
             return res.status(500).json({ error: 'Failed to record conversion' });
           }
           
-          // Update link as converted if we found one
           if (trackingId) {
             db.run(
               'UPDATE links SET converted = 1, converted_at = CURRENT_TIMESTAMP WHERE tracking_id = ?',
@@ -177,12 +166,11 @@ app.post('/webhook/appointment', (req, res) => {
   );
 });
 
-// 4. Dashboard API - Get statistics
+// Dashboard API - Get statistics
 app.get('/api/stats', (req, res) => {
   const { period = 'today', agentType } = req.query;
   
   let dateFilter = '';
-  const now = new Date();
   
   switch(period) {
     case 'today':
@@ -195,14 +183,13 @@ app.get('/api/stats', (req, res) => {
       dateFilter = `DATE(created_at) >= DATE('now', '-30 days', 'localtime')`;
       break;
     default:
-      dateFilter = '1=1'; // All time
+      dateFilter = '1=1';
   }
   
   if (agentType && agentType !== 'all') {
     dateFilter += ` AND agent_type = '${agentType}'`;
   }
   
-  // Get overview stats
   db.get(
     `SELECT 
       COUNT(*) as total_links,
@@ -218,7 +205,6 @@ app.get('/api/stats', (req, res) => {
         return res.status(500).json({ error: 'Failed to fetch stats' });
       }
       
-      // Get stats by agent type
       db.all(
         `SELECT 
           agent_type,
@@ -242,7 +228,6 @@ app.get('/api/stats', (req, res) => {
             return res.status(500).json({ error: 'Failed to fetch agent stats' });
           }
           
-          // Get recent activity
           db.all(
             `SELECT 
               tracking_id,
@@ -277,7 +262,7 @@ app.get('/api/stats', (req, res) => {
   );
 });
 
-// 5. Get link details
+// Get link details
 app.get('/api/link/:trackingId', (req, res) => {
   const { trackingId } = req.params;
   
@@ -303,7 +288,7 @@ app.get('/api/link/:trackingId', (req, res) => {
   );
 });
 
-// 6. Health check
+// Health check
 app.get('/', (req, res) => {
   res.send('Pop Tracker is running! 🏃');
 });
@@ -312,7 +297,7 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
-    dbPath: process.env.DATABASE_PATH || './tracking.db'
+    dbPath: './tracking.db'
   });
 });
 

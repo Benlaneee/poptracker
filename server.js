@@ -1,33 +1,3 @@
-// package.json
-{
-  "name": "poprunning-tracker",
-  "version": "1.0.0",
-  "description": "Link tracking server for Pop! Running AI agents",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
-    "init-db": "node server.js --init"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
-    "sqlite3": "^5.1.6",
-    "uuid": "^9.0.0",
-    "dotenv": "^16.3.1"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.1"
-  }
-}
-
-// .env (create this file - don't commit to git)
-PORT=3000
-DATABASE_PATH=./tracking.db
-DASHBOARD_PASSWORD=popadmin123
-GHL_LOCATION_ID=hTePW6K5KGjtcS4ClNxK
-
-// server.js
 const express = require('express');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
@@ -334,6 +304,10 @@ app.get('/api/link/:trackingId', (req, res) => {
 });
 
 // 6. Health check
+app.get('/', (req, res) => {
+  res.send('Pop Tracker is running! 🏃');
+});
+
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy', 

@@ -122,14 +122,26 @@ app.get('/t/:trackingId', (req, res) => {
   );
 });
 
-// Webhook for GHL appointment booked
+// IMPROVED Webhook for GHL appointment booked
 app.post('/webhook/appointment', (req, res) => {
-  const { contactId, appointmentId } = req.body;
+  console.log('Appointment webhook received:', JSON.stringify(req.body, null, 2));
+  
+  // GHL sends different fields depending on the trigger
+  const contactId = req.body.contact_id || 
+                    req.body.contactId || 
+                    req.body.contact?.id ||
+                    req.body.appointment?.contact_id;
+  
+  const appointmentId = req.body.id || 
+                       req.body.appointment_id || 
+                       req.body.appointment?.id;
   
   if (!contactId) {
-    return res.status(400).json({ error: 'Missing contactId' });
+    console.log('No contact ID found in webhook');
+    return res.status(200).json({ received: true, note: 'No contact ID' });
   }
   
+  // Find the most recent clicked link for this contact
   db.get(
     `SELECT tracking_id FROM links 
      WHERE contact_id = ? AND clicked = 1 
@@ -137,29 +149,43 @@ app.post('/webhook/appointment', (req, res) => {
     [contactId],
     (err, row) => {
       if (err) {
-        console.error('Error finding link:', err);
-        return res.status(500).json({ error: 'Database error' });
+        console.error('Database error:', err);
+        return res.status(200).json({ received: true, error: err.message });
       }
       
       const trackingId = row ? row.tracking_id : null;
       
+      // Record the conversion
       db.run(
         'INSERT INTO conversions (contact_id, tracking_id, metadata) VALUES (?, ?, ?)',
-        [contactId, trackingId, JSON.stringify({ appointmentId })],
+        [contactId, trackingId, JSON.stringify({ appointmentId, webhookData: req.body })],
         (err) => {
           if (err) {
             console.error('Error recording conversion:', err);
-            return res.status(500).json({ error: 'Failed to record conversion' });
           }
           
+          // Update the link as converted if we found one
           if (trackingId) {
             db.run(
               'UPDATE links SET converted = 1, converted_at = CURRENT_TIMESTAMP WHERE tracking_id = ?',
-              [trackingId]
+              [trackingId],
+              (updateErr) => {
+                if (updateErr) console.error('Update error:', updateErr);
+              }
             );
+            
+            console.log(`Conversion tracked for contact ${contactId}, tracking ID ${trackingId}`);
+          } else {
+            console.log(`No clicked links found for contact ${contactId} - booking recorded without attribution`);
           }
           
-          res.json({ success: true, trackingId });
+          res.json({ 
+            success: true, 
+            contactId,
+            appointmentId,
+            trackingFound: !!row,
+            trackingId: trackingId 
+          });
         }
       );
     }
